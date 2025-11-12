@@ -1,32 +1,32 @@
-// app/page.tsx
 "use client";
-import { useState } from "react";
-import { useRecorder } from "@/lib/useRecorder";
+import { useRef, useState } from "react";
+import { useWebmRecorder } from "@/lib/useWebmRecorder";
 
 export default function Home() {
+  const consultId = useRef(`consult-${crypto.randomUUID()}`);
   const [urls, setUrls] = useState<string[]>([]);
-  const consultId = "consult-" + Date.now(); // gerar ID simples
 
-  const { start, stop, isRecording } = useRecorder(
-    consultId,
-    (url) => setUrls((u) => [...u, url]) // salva ordem natural
+  const { start, stop, isRecording } = useWebmRecorder(consultId.current, (u) =>
+    setUrls((prev) => [...prev, u])
   );
 
   return (
     <main className="p-6 space-y-4">
+      <h1 className="text-xl font-semibold">Recorder fixado (WebM)</h1>
+
       <button
         onClick={isRecording ? stop : start}
-        className="px-4 py-2 rounded text-white
-          transition bg-emerald-600 hover:bg-emerald-700"
+        className={`px-6 py-3 rounded text-white ${
+          isRecording ? "bg-red-600" : "bg-emerald-600"
+        }`}
       >
-        {isRecording ? "Parar gravação" : "Iniciar gravação"}
+        {isRecording ? "Parar" : "Gravar"}
       </button>
 
-      <h2 className="font-medium">Blocos enviados:</h2>
       <ul className="space-y-2">
         {urls.map((u, i) => (
           <li key={i} className="flex items-center gap-2">
-            <span className="text-xs text-gray-500 w-12">#{i}</span>
+            <span className="text-xs w-8 text-gray-500">#{i}</span>
             <audio controls src={u} className="w-full" />
           </li>
         ))}
