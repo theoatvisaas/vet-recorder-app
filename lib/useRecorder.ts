@@ -1,6 +1,5 @@
 "use client";
 
-import { supabase } from "./supa";
 import { useRef, useState, useCallback } from "react";
 
 type UseRecorderReturn = {
@@ -10,8 +9,8 @@ type UseRecorderReturn = {
 };
 
 /**
- * Grava áudio em blocos de 10 s (Opus) e chama onBlob(blob, seq).
- * Mantém o MediaRecorder ativo enquanto a aba não for descarregada pelo SO.
+ * Grava áudio em blocos (sliceMs) e envia cada blob para
+ * /api/convert-upload, que converte WebM→WAV e salva no Storage.
  */
 export function useRecorder(
   consultId: string,
@@ -24,8 +23,11 @@ export function useRecorder(
 
   const start = useCallback(async () => {
     if (isRecording) return;
+
+    /* 1. Solicita microfone */
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    // Safari iOS precisa de mimeType explícito.
+
+    /* 2. Define mimeType – Chrome/Firefox ok com WebM; Safari aceita mas não toca */
     const rec = new MediaRecorder(stream, {
       mimeType: "audio/webm;codecs=opus",
       audioBitsPerSecond: 96_000,
@@ -33,31 +35,34 @@ export function useRecorder(
     recRef.current = rec;
     seqRef.current = 0;
 
-    rec.ondataavailable = async (e) => {
+    /* 3. Callback a cada blob */
+    rec.ondataavailable = async (e: BlobEvent) => {
       if (!e.data.size) return;
       const seq = seqRef.current++;
-      // caminho: consultId/seq.webm
-      const filePath = `${consultId}/${seq.toString().padStart(4, "0")}.webm`;
 
-      const { error } = await supabase.storage
-        .from("consult-audio")
-        .upload(filePath, e.data, { contentType: "audio/webm" });
+      /* monta multipart/form-data */
+      const fd = new FormData();
+      fd.append("file", e.data, "chunk.webm");
+      fd.append("consultId", consultId);
+      fd.append("seq", String(seq));
 
-      if (error) {
-        console.error("upload failed", error);
-        return;
+      try {
+        const res = await fetch("/api/convert-upload", {
+          method: "POST",
+          body: fd,
+        });
+        if (!res.ok) throw new Error(await res.text());
+
+        const { url } = (await res.json()) as { url: string };
+        onUploaded(url, seq);
+      } catch (err) {
+        console.error("upload failed", err);
       }
-
-      // pegar URL pública
-      const { data } = supabase.storage
-        .from("consult-audio")
-        .getPublicUrl(filePath);
-
-      onUploaded(data.publicUrl, seq);
     };
-    rec.start(sliceMs);
+
+    rec.start(sliceMs); // grava em blocos de 5 s
     setIsRecording(true);
-  }, [isRecording, onUploaded, sliceMs]);
+  }, [consultId, isRecording, onUploaded, sliceMs]);
 
   const stop = useCallback(() => {
     recRef.current?.stop();
