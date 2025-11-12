@@ -1,4 +1,6 @@
 "use client";
+
+import { supabase } from "./supa";
 import { useRef, useState, useCallback } from "react";
 
 type UseRecorderReturn = {
@@ -12,8 +14,9 @@ type UseRecorderReturn = {
  * Mantém o MediaRecorder ativo enquanto a aba não for descarregada pelo SO.
  */
 export function useRecorder(
-  onBlob: (blob: Blob, seq: number) => void,
-  sliceMs = 10_000
+  consultId: string,
+  onUploaded: (publicUrl: string, seq: number) => void,
+  sliceMs = 5_000
 ): UseRecorderReturn {
   const [isRecording, setIsRecording] = useState(false);
   const recRef = useRef<MediaRecorder | null>(null);
@@ -30,12 +33,31 @@ export function useRecorder(
     recRef.current = rec;
     seqRef.current = 0;
 
-    rec.ondataavailable = (e) => {
-      if (e.data.size) onBlob(e.data, seqRef.current++);
+    rec.ondataavailable = async (e) => {
+      if (!e.data.size) return;
+      const seq = seqRef.current++;
+      // caminho: consultId/seq.webm
+      const filePath = `${consultId}/${seq.toString().padStart(4, "0")}.webm`;
+
+      const { error } = await supabase.storage
+        .from("consult-audio")
+        .upload(filePath, e.data, { contentType: "audio/webm" });
+
+      if (error) {
+        console.error("upload failed", error);
+        return;
+      }
+
+      // pegar URL pública
+      const { data } = supabase.storage
+        .from("consult-audio")
+        .getPublicUrl(filePath);
+
+      onUploaded(data.publicUrl, seq);
     };
     rec.start(sliceMs);
     setIsRecording(true);
-  }, [isRecording, onBlob, sliceMs]);
+  }, [isRecording, onUploaded, sliceMs]);
 
   const stop = useCallback(() => {
     recRef.current?.stop();
