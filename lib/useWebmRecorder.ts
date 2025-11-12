@@ -1,4 +1,3 @@
-// lib/useWebmRecorder.ts
 "use client";
 import { useState, useRef, useCallback } from "react";
 import { supabase } from "./supa";
@@ -7,10 +6,11 @@ import { supabase } from "./supa";
 function stripDuration(header: Uint8Array) {
   for (let i = 0; i < header.length - 1; i++) {
     if (header[i] === 0x44 && header[i + 1] === 0x89) {
-      const sizeFirst = header[i + 2]; // 1º byte do tamanho EBML
-      const sizeLen = 1; // para Duration cabe sempre em 1 byte
-      const dataLen = sizeFirst & 0b01111111; // remove bit marcador
+      const sizeFirst = header[i + 2];
+      const sizeLen = 1;
+      const dataLen = sizeFirst & 0b0111_1111; // limpa bit marcador
       const end = i + 2 + sizeLen + dataLen;
+
       const out = new Uint8Array(header.length - (end - i));
       out.set(header.slice(0, i), 0);
       out.set(header.slice(end), i);
@@ -29,10 +29,7 @@ function splitWebM(raw: Uint8Array) {
       raw[i + 2] === 0xb6 &&
       raw[i + 3] === 0x75
     ) {
-      return {
-        header: raw.slice(0, i),
-        clusters: raw.slice(i),
-      };
+      return { header: raw.slice(0, i), clusters: raw.slice(i) };
     }
   }
   return { header: new Uint8Array(), clusters: raw };
@@ -63,7 +60,7 @@ export function useWebmRecorder(
   const [isRecording, setIsRecording] = useState(false);
   const recRef = useRef<MediaRecorder | null>(null);
   const seqRef = useRef(0);
-  const headerRef = useRef<Uint8Array>();
+  const headerRef = useRef<Uint8Array | null>(null); // ← inicializado
 
   const handleChunk = async (ev: BlobEvent) => {
     if (!ev.data.size) return;
@@ -73,9 +70,8 @@ export function useWebmRecorder(
     const seq = seqRef.current++;
 
     if (!headerRef.current) {
-      headerRef.current = stripDuration(header); // ← ajuste
-      // blob #0 já inclui áudio → sobe completo
-      await upload(ev.data, consultId, seq, onUploaded);
+      headerRef.current = stripDuration(header);
+      await upload(ev.data, consultId, seq, onUploaded); // envia blob #0
       return;
     }
 
@@ -89,18 +85,19 @@ export function useWebmRecorder(
 
   const start = useCallback(async () => {
     if (isRecording) return;
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
 
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     const rec = new MediaRecorder(stream, {
       mimeType: "audio/webm;codecs=opus",
       audioBitsPerSecond: 96_000,
     });
+
     rec.addEventListener("dataavailable", handleChunk);
     rec.start(sliceMs);
 
     recRef.current = rec;
     seqRef.current = 0;
-    headerRef.current = undefined;
+    headerRef.current = null; // ← reset correto
     setIsRecording(true);
   }, [isRecording, sliceMs]);
 
