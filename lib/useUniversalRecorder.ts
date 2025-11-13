@@ -23,7 +23,7 @@ async function upload(
   blob: Blob,
   consultId: string,
   seq: number,
-  ext: "webm" | "m4a",
+  ext: "webm" | "m4a" | "mp4",
   onUrl: (u: string, s: number) => void
 ) {
   const path = `${consultId}/${seq.toString().padStart(4, "0")}.${ext}`;
@@ -61,30 +61,32 @@ export function useUniversalRecorder(
     if (mime === "webm") {
       // --- caminho Android / iOS 18.4+
       recRef.current = startWebmRecorder(stream, consultId, onUrl, sliceMs);
+      /* ---------- caminho AAC corrigido ---------- */
     } else {
-      // --- caminho AAC / mp4
+      // mime === "mp4"
       let seq = 0;
       let header: Uint8Array | null = null;
 
       const handler = async (e: BlobEvent) => {
+        if (!e.data.size) return; // ignora blobs vazios
+
         const raw = new Uint8Array(await e.data.arrayBuffer());
         const { header: hdr, fragment } = splitMp4(raw);
 
-        if (!header) {
-          // primeiro bloco: guarda header
-          header = hdr;
-          await upload(e.data, consultId, seq++, "m4a", onUrl);
-          return;
-        }
+        // se não veio fragmento → ainda é somente header, então aguarda o próximo
+        if (!fragment.length) return;
+
+        if (!header) header = hdr; // guarda ftyp+moov (1ª vez válida)
+
         const combo = new Uint8Array(header.length + fragment.length);
         combo.set(header, 0);
         combo.set(fragment, header.length);
 
         await upload(
-          new Blob([combo], { type: "audio/mp4" }),
+          new Blob([combo], { type: "video/mp4" }),
           consultId,
           seq++,
-          "m4a",
+          "mp4", // <── usa ext .mp4
           onUrl
         );
       };
